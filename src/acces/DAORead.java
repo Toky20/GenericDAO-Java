@@ -143,6 +143,7 @@ public class DAORead {
                         if (value instanceof String) {
                             value = value.toString().replace("'", "''");
                         }
+                        System.out.println(field.getName()+":"+value.getClass().getName());
                         setterMethod.invoke(instance, value);
                     }
                 }
