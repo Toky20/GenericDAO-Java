@@ -29,7 +29,7 @@ for /R %SRC_MAIN_DIR% %%a in (*.java) do (
 
 REM Compiler les classes Java
 REM -cp %LIB_DIR%\*
-javac -d %APP_DIR%temp\classes %APP_DIR%temp\java_files\*.java 
+javac -cp %LIB_DIR%\* -d %APP_DIR%temp\classes %APP_DIR%temp\java_files\*.java 
 
 cd "%APP_DIR%temp\classes"
 

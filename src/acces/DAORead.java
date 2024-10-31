@@ -16,6 +16,11 @@ import java.sql.Statement;
 import java.sql.Types;
 import java.util.ArrayList;
 import java.util.List;
+import java.math.BigDecimal;
+import java.lang.Long;
+import org.postgresql.util.PGInterval;
+import java.sql.Time;
+import java.sql.Timestamp;
 
 public class DAORead {
     
@@ -142,6 +147,28 @@ public class DAORead {
                         // Conversion de type
                         if (value instanceof String) {
                             value = value.toString().replace("'", "''");
+                        }
+
+                        // Conversion de type spécifique pour BigDecimal vers double
+                        if (value instanceof BigDecimal && setterMethod.getParameterTypes()[0] == double.class) {
+                            value = ((BigDecimal) value).doubleValue();
+                        }
+
+                        if (value instanceof Long && setterMethod.getParameterTypes()[0] == int.class) {
+                            value = ((Long) value).intValue();
+                        }
+
+                        if (value instanceof PGInterval && setterMethod.getParameterTypes()[0] == Time.class) {
+                            PGInterval interval = (PGInterval) value;
+
+                            int hour = interval.getHours();
+                            int minutes = interval.getMinutes();
+                            int seconds = interval.getWholeSeconds();
+                            int secFromMilli = interval.getMicroSeconds() / 1000000;
+
+                            // Création de l'objet Time
+                            Time time = new Time(hour,minutes,seconds+secFromMilli);
+                            value = time;
                         }
                         System.out.println(field.getName()+":"+value.getClass().getName());
                         setterMethod.invoke(instance, value);
@@ -683,4 +710,125 @@ public class DAORead {
             return new ArrayList<>();
         }
     }
+
+    /**
+     * Recherche des éléments dans une table en fonction de critères multiples.
+     *
+     * Cette méthode construit dynamiquement une requête SQL `SELECT *` avec une clause `WHERE` 
+     * basée sur les propriétés non nulles de l'objet passé en paramètre. Elle utilise l'opérateur `LIKE` 
+     * pour effectuer des recherches partielles sur les chaînes de caractères.
+     * 
+     * Si aucun critère n'est spécifié (tous les champs de l'objet sont nulls), la requête 
+     * retournera tous les enregistrements de la table.
+     *
+     * @param co La connexion à la base de données.
+     * @param o L'objet contenant les critères de recherche. Les propriétés non nulles de cet objet
+     *        seront utilisées pour construire la clause WHERE de la requête SQL.
+     * @param <T> Le type générique de l'objet à rechercher.
+     * @return Une liste d'objets correspondant aux critères de recherche, ou une liste vide si aucun résultat n'est trouvé.
+     * @throws Exception Si une erreur se produit lors de l'exécution de la requête SQL.
+     */
+    public <T> List<T> findMulticriteria(Connection co, T o,T obj2) throws Exception {
+        Class<?> clazz = o.getClass();
+        Table tableAnnotation = clazz.getAnnotation(Table.class);
+        String tableName = tableAnnotation != null ? tableAnnotation.nom() : clazz.getSimpleName().toLowerCase();
+        // Build WHERE clause dynamically based on non-null fields
+        StringBuilder whereClause = new StringBuilder();
+        List<Object> valuesList = new ArrayList<>();
+        int counter = 0;
+        for (Field field : clazz.getDeclaredFields()) {
+            if (!Modifier.isStatic(field.getModifiers())) {
+                String getterName = "get" + Character.toUpperCase(field.getName().charAt(0)) + field.getName().substring(1);
+                Method getterMethod = clazz.getMethod(getterName);
+                Object value = getterMethod.invoke(o);
+                Object value2 = getterMethod.invoke(obj2);
+       
+                if (value != null) {
+                    if (value.equals(value2)) {
+                        continue;
+                    }
+                    if (counter > 0) {
+                        whereClause.append(" AND ");
+                    } else {
+                        whereClause.append(" WHERE ");
+                    }
+                    String columnName = field.getName();
+                    Colonne colonneAnnotation = field.getAnnotation(Colonne.class);
+                    if (colonneAnnotation != null) {
+                        columnName = colonneAnnotation.nom();
+                    }
+                    if (field.getType()==String.class) {
+                        whereClause.append("lower("+columnName + ") LIKE ?");
+                        valuesList.add("%" + ((String) value).toLowerCase() + "%");
+                    } else {
+                        whereClause.append(columnName + " = ?");
+                        valuesList.add(value);
+                    }
+                    
+                    counter++;
+                }
+            }
+        }
+        String query = "SELECT * FROM " + tableName + " " + whereClause.toString() + ";";
+        System.out.println(query);
+        List<T> results;
+        // Set values for prepared statement
+        try (PreparedStatement stmt = co.prepareStatement(query)) {
+            // Set values for prepared statement
+            for (int i = 0; i < valuesList.size(); i++) {
+                stmt.setObject(i + 1, valuesList.get(i));
+                
+            }  try (ResultSet rs = stmt.executeQuery()) {
+                results = new ArrayList<>();
+                while (rs.next()) {
+                    T instance = (T) clazz.newInstance();
+                    for (Field field : clazz.getDeclaredFields()) {
+                        if (!Modifier.isStatic(field.getModifiers())) {
+                            String columnName = field.getName();
+                            Colonne colonneAnnotation = field.getAnnotation(Colonne.class);
+                            if (colonneAnnotation != null) {
+                                columnName = colonneAnnotation.nom();
+                            }
+                            String setterName = "set" + Character.toUpperCase(field.getName().charAt(0)) + field.getName().substring(1);
+                            Method setterMethod = clazz.getMethod(setterName, field.getType());
+                            Object value = rs.getObject(columnName);
+                            // Conversion de type (same logic as findAll)
+                            if (value instanceof String) {
+                                value = value.toString().replace("'", "''");
+                            }
+
+                            // Conversion de type spécifique pour BigDecimal vers double
+                            if (value instanceof BigDecimal && setterMethod.getParameterTypes()[0] == double.class) {
+                                value = ((BigDecimal) value).doubleValue();
+                            }
+
+                            if (value instanceof Long && setterMethod.getParameterTypes()[0] == int.class) {
+                                value = ((Long) value).intValue();
+                            }
+
+                            if (value instanceof PGInterval && setterMethod.getParameterTypes()[0] == Time.class) {
+                                PGInterval interval = (PGInterval) value;
+
+                                int hour = interval.getHours();
+                                int minutes = interval.getMinutes();
+                                int seconds = interval.getWholeSeconds();
+                                int secFromMilli = interval.getMicroSeconds() / 1000000;
+
+                                // Création de l'objet Time
+                                Time time = new Time(hour,minutes,seconds+secFromMilli);
+                                value = time;
+                            }
+
+
+                            setterMethod.invoke(instance, value);
+                        }
+                    }
+                    results.add(instance);
+                }
+            }
+        }
+        return results;
+    }
 }
+
+
